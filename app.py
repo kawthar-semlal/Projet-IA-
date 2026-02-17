@@ -3,67 +3,75 @@ import pandas as pd
 from openai import OpenAI
 
 # --- CONFIGURATION DE L'IA ---
+# Votre clé reste la même
 client = OpenAI(
   base_url="https://openrouter.ai/api/v1",
   api_key="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", 
 )
-MODEL_NAME = "meta-llama/llama-3.3-70b-instruct:free"
 
-# --- INTERFACE STREAMLIT ---
-st.set_page_config(page_title="IA Customer Support", page_icon="🤖")
-st.title("🤖 Assistant Intelligent - Support Client")
-st.markdown("---")
+# On utilise ce modèle stable et gratuit
+MODEL_NAME = "google/gemini-2.0-flash-lite-preview-02-05:free"
 
-# Chargement du dataset
+# --- INTERFACE DU CHATBOT ---
+st.set_page_config(page_title="IA Support Client", page_icon="🤖")
+st.title("🤖 Chatbot Intelligent - Projet IA 2026")
+st.markdown("Structure conseillée pour M. Halim")
+
+# Chargement sécurisé du dataset
 @st.cache_data
 def load_data():
-    return pd.read_csv('customer_support_tickets_cleaned.csv')
+    try:
+        return pd.read_csv('customer_support_tickets_cleaned.csv')
+    except:
+        # Si le fichier est introuvable, on crée un petit tableau vide pour éviter le crash
+        return pd.DataFrame(columns=['Ticket Subject', 'Ticket Description', 'Resolution'])
 
 df = load_data()
 
-# Fonction de recherche RAG simple (contexte)
-def get_historical_context(query):
-    # On cherche les 2 tickets les plus proches par mots-clés
-    keywords = query.lower().split()
-    mask = df['Ticket Description'].str.contains('|'.join(keywords), case=False, na=False)
-    results = df[mask].head(2)
-    
-    context = ""
-    for _, row in results.iterrows():
-        context += f"\n- Sujet: {row['Ticket Subject']} | Solution: {row['Resolution']}\n"
-    return context if context else "Aucun historique trouvé."
-
-# --- ZONE DE CHAT ---
+# --- HISTORIQUE ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Affichage de l'historique
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Entrée utilisateur
-if prompt := st.chat_input("Posez votre question (ex: Problème de setup GoPro)"):
+# --- LOGIQUE DU CHATBOT ---
+if prompt := st.chat_input("Posez votre question ici..."):
+    # 1. Afficher le message utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Récupération du contexte RAG
-    contexte = get_historical_context(prompt)
+    # 2. Recherche de contexte (RAG)
+    # On cherche si des mots clés existent dans notre dataset
+    mots_cles = prompt.lower().split()
+    contexte = ""
+    if not df.empty:
+        # Recherche simple dans les colonnes de texte
+        resultats = df[df['Ticket Description'].str.contains('|'.join(mots_cles[:3]), case=False, na=False)].head(2)
+        for _, row in resultats.iterrows():
+            contexte += f"Historique: {row['Ticket Subject']} -> Solution: {row['Resolution']}\n"
 
-    # Appel à l'IA
+    # 3. Réponse de l'IA
     with st.chat_message("assistant"):
-        instruction_systeme = f"""Tu es un agent de support client expert. 
-        Voici le contexte issu de notre base de données : {contexte}
-        Réponds de manière professionnelle et concise."""
-        
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": instruction_systeme},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        full_response = response.choices[0].message.content
-        st.markdown(full_response)
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+        message_placeholder = st.empty()
+        try:
+            instruction_systeme = f"""Tu es un assistant de support client expert et poli.
+            Utilise ce contexte issu de nos données si utile : {contexte}
+            Si la question n'est pas dans les données, réponds de façon intelligente et aide le client.
+            Réponds toujours en français (ou la langue du client)."""
+
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": instruction_systeme},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            full_response = response.choices[0].message.content
+            message_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
+        except Exception as e:
+            st.error(f"Désolé, l'IA est très sollicitée. Erreur: {str(e)}")
